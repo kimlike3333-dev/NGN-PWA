@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>奈拉报价器</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#0d6efd">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="奈拉报价">
+  <link rel="apple-touch-icon" href="icon-192.png">
+
+  <!-- OCR: Tesseract.js（首次需联网加载，后续SW会缓存） -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+  <style>
+    *{box-sizing:border-box;}
+    body{
+      margin:0; padding:14px;
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"PingFang SC","Microsoft Yahei",sans-serif;
+      background:#f6f7f9; color:#111;
+    }
+    .card{
+      background:#fff; border-radius:12px; padding:14px;
+      box-shadow:0 6px 18px rgba(0,0,0,.06);
+      margin-bottom:12px;
+    }
+    h1{font-size:18px; margin:0 0 10px;}
+    .pill{
+      display:inline-block;
+      font-size:12px;
+      padding:4px 10px;
+      border-radius:999px;
+      background:#eef5ff;
+      color:#2566d4;
+      margin-bottom:10px;
+    }
+    label{display:block; font-size:12px; color:#555; margin:10px 0 6px;}
+    input, textarea{
+      width:100%;
+      padding:12px 12px;
+      border:1px solid #d9dde3;
+      border-radius:10px;
+      font-size:16px;
+      background:#fff;
+      outline:none;
+    }
+    textarea{min-height:110px; font-size:13px;}
+    .btn{
+      width:100%;
+      margin-top:10px;
+      padding:12px 14px;
+      border:0;
+      border-radius:10px;
+      font-size:16px;
+      background:#0d6efd;
+      color:#fff;
+      cursor:pointer;
+    }
+    .btn.secondary{ background:#111; }
+    .btn:active{transform:translateY(1px); opacity:.95;}
+    .row{display:flex; gap:10px; align-items:center;}
+    .row .btn{flex:1;}
+    .tip{font-size:12px; color:#666; margin-top:10px; line-height:1.5;}
+    .list .item{
+      background:#fff;
+      border-radius:12px;
+      padding:12px 12px;
+      box-shadow:0 4px 14px rgba(0,0,0,.05);
+      margin-bottom:10px;
+      position:relative;
+    }
+    .item .title{ font-weight:700; font-size:14px; margin-bottom:6px; }
+    .item pre{ margin:0; white-space:pre-wrap; font-size:14px; line-height:1.45; }
+    .copy{
+      position:absolute; right:10px; top:10px;
+      padding:8px 10px;
+      border-radius:10px;
+      border:1px solid #cfd6df;
+      background:#fff;
+      font-size:13px;
+      cursor:pointer;
+    }
+    .copy:active{transform:translateY(1px); opacity:.95;}
+    .toast{
+      position:fixed; left:50%; bottom:18px;
+      transform:translateX(-50%);
+      background:rgba(0,0,0,.78);
+      color:#fff;
+      padding:10px 12px;
+      border-radius:999px;
+      font-size:13px;
+      display:none;
+      z-index:999;
+      max-width:90%;
+      text-align:center;
+    }
+    .ocr-box{
+      margin-top:10px;
+      padding:10px;
+      border-radius:10px;
+      background:#f3f5f8;
+      font-size:12px;
+      color:#444;
+      line-height:1.45;
+    }
+    .chips{display:flex; flex-wrap:wrap; gap:8px; margin-top:10px;}
+    .chip{
+      border:1px solid #cfd6df;
+      background:#fff;
+      padding:8px 10px;
+      border-radius:999px;
+      font-size:14px;
+      cursor:pointer;
+    }
+    .chip:active{transform:translateY(1px); opacity:.95;}
+    .muted{color:#666;}
+    .progress{margin-top:8px; font-size:12px; color:#333;}
+    input[type="file"]{display:none;}
+  </style>
+</head>
+
+<body>
+  <div class="card">
+    <div class="pill">PWA · 极简手机版 · 截断2位（不四舍五入）· OCR识别截图</div>
+    <h1>奈拉报价器</h1>
+
+    <label>NGN = 1 USD（基准价）</label>
+    <input id="usd" type="number" step="0.00000001" inputmode="decimal" placeholder="例如：1476.86491116" />
+
+    <label>NGN = 1 CNY（基准价）</label>
+    <input id="cny" type="number" step="0.00000001" inputmode="decimal" placeholder="例如：209.51" />
+
+    <div class="row">
+      <button class="btn secondary" id="btnOcr">识别截图填入</button>
+      <button class="btn" id="btnGen">生成报价清单</button>
+    </div>
+
+    <input id="fileInput" type="file" accept="image/*" />
+
+    <div class="ocr-box" id="ocrBox" style="display:none;">
+      <div><b>识别结果：</b><span class="muted" id="ocrStatus">准备中</span></div>
+      <div class="progress" id="ocrProgress"></div>
+      <div class="chips" id="chips"></div>
+      <div class="tip muted" id="ocrHint"></div>
+    </div>
+
+    <label>折扣方案（支持 : / ：）</label>
+    <textarea id="plans">方案0：1
+方案1：0.99928448982490100000
+方案2：0.99909088199475500000
+方案3：0.99879317023531000000
+方案4:0.99848076378446500000 
+方案5:0.99799023402480800000 
+方案6:0.99748534357219700000 
+方案7:0.99698096368008100000 
+方案8:0.99649190611327800000 
+方案9:0.99598853016727400000 
+方案10:0.99548566252261900000 
+方案11:0.99498330240838700000 
+方案12:0.99449620222813200000</textarea>
+
+    <div class="tip">
+      复制文案固定包含“优惠价”，不含系数/计算过程。<br/>
+      例：1475.8082 → 1475.80（截断，不四舍五入）
+    </div>
+  </div>
+
+  <div class="list" id="list"></div>
+  <div class="toast" id="toast">已复制</div>
+
+<script>
+  // ===== PWA: Service Worker 注册（https 下生效）=====
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("./sw.js").catch(()=>{});
+    });
+  }
+
+  // ===== 业务逻辑 =====
+  function truncate2(num){
+    if (isNaN(num)) return "";
+    return (Math.floor(num * 100) / 100).toFixed(2);
+  }
+
+  function parsePlans(raw){
+    return raw.split("\n")
+      .map(l => l.trim())
+      .filter(Boolean)
+      .map(l => {
+        const idx = parseInt((l.match(/\d+/) || ["0"])[0], 10);
+        const nums = l.match(/[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?/g) || [];
+        const rate = nums.length ? parseFloat(nums[nums.length - 1]) : NaN;
+        return { idx, rate, name: "方案" + idx };
+      })
+      .filter(p => !isNaN(p.rate))
+      .sort((a,b) => a.idx - b.idx);
+  }
+
+  function showToast(msg){
+    const t = document.getElementById("toast");
+    t.textContent = msg;
+    t.style.display = "block";
+    clearTimeout(showToast._timer);
+    showToast._timer = setTimeout(()=> t.style.display="none", 900);
+  }
+
+  async function copy(text){
+    try{
+      await navigator.clipboard.writeText(text);
+      showToast("已复制");
+    }catch(e){
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand("copy"); showToast("已复制"); }
+      catch { showToast("复制失败，请手动复制"); }
+      document.body.removeChild(ta);
+    }
+  }
+
+  function buildText(u, c){
+    const lines = [];
+    lines.push("今日奈拉报价：");
+    lines.push("优惠价");
+    if (u) lines.push(u + " NGN = 1 USD");
+    if (c) lines.push(c + " NGN = 1 CNY");
+    lines.push("实时汇率波动");
+    return lines.join("\n");
+  }
+
+  function generate(){
+    const usd = parseFloat(document.getElementById("usd").value);
+    const cny = parseFloat(document.getElementById("cny").value);
+    const plans = parsePlans(document.getElementById("plans").value);
+    const list = document.getElementById("list");
+    list.innerHTML = "";
+
+    plans.forEach(p => {
+      const u = !isNaN(usd) ? truncate2(usd * p.rate) : "";
+      const c = !isNaN(cny) ? truncate2(cny * p.rate) : "";
+      const text = buildText(u, c);
+
+      const item = document.createElement("div");
+      item.className = "item";
+      item.innerHTML = `
+        <button class="copy">复制</button>
+        <div class="title">${p.name}</div>
+        <pre></pre>
+      `;
+      item.querySelector("pre").textContent = text;
+      item.querySelector(".copy").addEventListener("click", () => copy(text));
+      list.appendChild(item);
+    });
+
+    if (!plans.length) showToast("未解析到方案，请检查格式");
+  }
+
+  // ===== OCR：识别截图填入 =====
+  const ocrBox = document.getElementById("ocrBox");
+  const ocrStatus = document.getElementById("ocrStatus");
+  const ocrProgress = document.getElementById("ocrProgress");
+  const chips = document.getElementById("chips");
+  const ocrHint = document.getElementById("ocrHint");
+  const fileInput = document.getElementById("fileInput");
+
+  function resetOcrUI(){
+    ocrBox.style.display = "block";
+    ocrStatus.textContent = "等待选择截图…";
+    ocrProgress.textContent = "";
+    chips.innerHTML = "";
+    ocrHint.textContent = "提示：如自动填错，点下面数字可快速替换输入框（优先填USD，再填CNY）。";
+  }
+
+  function extractNumbers(text){
+    const matches = text.match(/(\d{1,5}(?:[,\s]\d{3})*(?:\.\d+)?|\d+\.\d+)/g) || [];
+    const nums = matches
+      .map(s => s.replace(/[, \t]/g, ""))
+      .filter(s => /\d/.test(s))
+      .map(s => ({ raw: s, val: parseFloat(s) }))
+      .filter(x => !isNaN(x.val));
+
+    const seen = new Set();
+    const uniq = [];
+    for (const n of nums){
+      const key = n.val.toString();
+      if (!seen.has(key)){
+        seen.add(key);
+        uniq.push(n);
+      }
+    }
+    return uniq;
+  }
+
+  function autoAssign(nums){
+    const usdCandidates = nums.filter(n => n.val >= 500 && n.val <= 50000);
+    const cnyCandidates = nums.filter(n => n.val >= 10 && n.val <= 5000);
+
+    const usdPick = (usdCandidates.length ? usdCandidates : nums).slice().sort((a,b)=>b.val-a.val)[0];
+    const cnyPick = (cnyCandidates.length ? cnyCandidates : nums).slice().sort((a,b)=>a.val-b.val)[0];
+
+    return { usdPick, cnyPick };
+  }
+
+  function setField(fieldId, value){
+    document.getElementById(fieldId).value = value;
+  }
+
+  function renderChips(nums){
+    chips.innerHTML = "";
+    nums.slice(0, 24).forEach(n => {
+      const btn = document.createElement("button");
+      btn.className = "chip";
+      btn.type = "button";
+      btn.textContent = n.raw;
+      btn.onclick = () => {
+        const usdEl = document.getElementById("usd");
+        const cnyEl = document.getElementById("cny");
+        if (!usdEl.value) setField("usd", n.raw);
+        else if (!cnyEl.value) setField("cny", n.raw);
+        else setField("usd", n.raw);
+        showToast("已填入");
+      };
+      chips.appendChild(btn);
+    });
+  }
+
+  async function runOcr(file){
+    resetOcrUI();
+    ocrStatus.textContent = "正在识别…";
+    ocrProgress.textContent = "0%";
+
+    try{
+      const { data } = await Tesseract.recognize(file, "eng", {
+        logger: m => {
+          if (m.status === "recognizing text" && m.progress != null){
+            ocrProgress.textContent = Math.round(m.progress * 100) + "%";
+          } else if (m.status){
+            ocrProgress.textContent = m.status;
+          }
+        }
+      });
+
+      const text = (data && data.text) ? data.text : "";
+      const nums = extractNumbers(text);
+
+      if (!nums.length){
+        ocrStatus.textContent = "没识别到数字";
+        ocrHint.textContent = "建议：截图里把汇率数字放大一些、或换更清晰的截图再试。";
+        return;
+      }
+
+      const { usdPick, cnyPick } = autoAssign(nums);
+      if (usdPick) setField("usd", usdPick.raw);
+      if (cnyPick) setField("cny", cnyPick.raw);
+
+      ocrStatus.textContent = `已识别到 ${nums.length} 个数字（已自动填入）`;
+      renderChips(nums);
+      showToast("识别完成");
+    }catch(e){
+      ocrStatus.textContent = "识别失败";
+      ocrHint.textContent = "可能原因：首次未联网加载OCR引擎/图片过大/系统限制。重试一次通常可解决。";
+    }
+  }
+
+  document.getElementById("btnOcr").addEventListener("click", () => {
+    fileInput.value = "";
+    fileInput.click();
+  });
+
+  fileInput.addEventListener("change", (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (f) runOcr(f);
+  });
+
+  document.getElementById("btnGen").addEventListener("click", generate);
+  window.addEventListener("load", generate);
+</script>
+
+</body>
+</html>
